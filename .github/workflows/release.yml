@@ -79,6 +79,9 @@ jobs:
           RELEASE_VERSION: ${{ steps.intent.outputs.version }}
         run: |
           $asset = "private/release/Veylo-$($env:RELEASE_VERSION)-Setup.exe"
-          if (!(Test-Path $asset)) { throw 'Instalador ausente.' }
-          gh release create "v$($env:RELEASE_VERSION)" $asset --repo Guilherme-devcode/veylo-updates --title "Veylo $($env:RELEASE_VERSION)" --notes "Atualização do Veylo para Windows. Feche o aplicativo antes de instalar. Os dados locais são preservados."
+          $blockMap = "$asset.blockmap"
+          $metadata = "private/release/latest.yml"
+          $assets = @($asset, $blockMap, $metadata)
+          foreach ($file in $assets) { if (!(Test-Path $file)) { throw "Arquivo de atualização ausente: $file" } }
+          gh release create "v$($env:RELEASE_VERSION)" @assets --repo Guilherme-devcode/veylo-updates --title "Veylo $($env:RELEASE_VERSION)" --notes "O Veylo baixa atualizações em segundo plano e as instala ao fechar o aplicativo. Os dados locais são preservados."
           if ($LASTEXITCODE -ne 0) { throw 'Publicação falhou.' }
