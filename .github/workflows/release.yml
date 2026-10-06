@@ -1,0 +1,81 @@
+name: Publicar instalador do Veylo
+
+on:
+  push:
+    branches: [main]
+    paths: [release-intent.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: veylo-public-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validar pedido de publicação
+        id: intent
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $intent = Get-Content release-intent.json -Raw | ConvertFrom-Json
+          if ($intent.version -notmatch '^\d+\.\d+\.\d+$') { throw 'Versão inválida.' }
+          if ($intent.sha -notmatch '^[0-9a-f]{40}$') { throw 'Commit inválido.' }
+          "version=$($intent.version)" >> $env:GITHUB_OUTPUT
+          "sha=$($intent.sha)" >> $env:GITHUB_OUTPUT
+          gh release view "v$($intent.version)" --repo Guilherme-devcode/veylo-updates --json tagName 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { "exists=true" >> $env:GITHUB_OUTPUT }
+      - name: Obter código privado somente para este build
+        if: steps.intent.outputs.exists != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: Guilherme-devcode/veylo-pdv
+          ref: ${{ steps.intent.outputs.sha }}
+          path: private
+          ssh-key: ${{ secrets.PRIVATE_SOURCE_DEPLOY_KEY }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: steps.intent.outputs.exists != 'true'
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: private/package-lock.json
+      - name: Verificar versão e instalar dependências
+        if: steps.intent.outputs.exists != 'true'
+        shell: pwsh
+        working-directory: private
+        env:
+          RELEASE_VERSION: ${{ steps.intent.outputs.version }}
+        run: |
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($package.version -ne $env:RELEASE_VERSION) { throw 'A versão do commit não coincide com o pedido.' }
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci falhou.' }
+      - name: Testar e empacotar no Windows
+        if: steps.intent.outputs.exists != 'true'
+        shell: pwsh
+        working-directory: private
+        run: |
+          npm run format:check
+          if ($LASTEXITCODE -ne 0) { throw 'Formatação inválida.' }
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'Testes falharam.' }
+          npm run dist
+          if ($LASTEXITCODE -ne 0) { throw 'Empacotamento falhou.' }
+      - name: Publicar release e instalador
+        if: steps.intent.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.intent.outputs.version }}
+        run: |
+          $asset = "private/release/Veylo-$($env:RELEASE_VERSION)-Setup.exe"
+          if (!(Test-Path $asset)) { throw 'Instalador ausente.' }
+          gh release create "v$($env:RELEASE_VERSION)" $asset --repo Guilherme-devcode/veylo-updates --title "Veylo $($env:RELEASE_VERSION)" --notes "Atualização do Veylo para Windows. Feche o aplicativo antes de instalar. Os dados locais são preservados."
+          if ($LASTEXITCODE -ne 0) { throw 'Publicação falhou.' }
