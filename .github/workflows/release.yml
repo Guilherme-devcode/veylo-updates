@@ -67,7 +67,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Formatação inválida.' }
           npm test
           if ($LASTEXITCODE -ne 0) { throw 'Testes falharam.' }
-          npm run dist
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'Build falhou.' }
+          npx electron-builder --win nsis --publish never
           if ($LASTEXITCODE -ne 0) { throw 'Empacotamento falhou.' }
       - name: Publicar release e instalador
         if: steps.intent.outputs.exists != 'true'
